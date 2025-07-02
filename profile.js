@@ -35,70 +35,11 @@ function showError(message) {
     errorMsg.style.display = "block";
 }
 
-// Validate JWT format
+// Check if token is a valid JWT
 function isValidToken(token) {
     if (!token) return false;
-    try {
-        const parts = token.split('.');
-        if (parts.length !== 3) return false;
-        return parts.every(part => {
-            try {
-                return btoa(atob(part.replace(/-/g, '+').replace(/_/g, '/'))) === 
-                       part.replace(/-/g, '+').replace(/_/g, '/');
-            } catch (e) {
-                return false;
-            }
-        });
-    } catch (e) {
-        return false;
-    }
-}
-
-// Render XP bar chart
-function renderProjectXPBars(transactions) {
-    const projectMap = {};
-    transactions.forEach(tx => {
-        const name = tx.object?.name || "Unknown";
-        if (!projectMap[name]) {
-            projectMap[name] = 0;
-        }
-        projectMap[name] += tx.amount;
-    });
-
-    const entries = Object.entries(projectMap);
-    const maxXP = Math.max(...entries.map(([_, xp]) => xp));
-    const barHeight = 25;
-    const barSpacing = 10;
-    const width = 600;
-
-    const svgHeight = entries.length * (barHeight + barSpacing);
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("width", width);
-    svg.setAttribute("height", svgHeight);
-
-    entries.forEach(([name, xp], i) => {
-        const y = i * (barHeight + barSpacing);
-        const barWidth = (xp / maxXP) * (width - 150);
-
-        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-        rect.setAttribute("x", 0);
-        rect.setAttribute("y", y);
-        rect.setAttribute("width", barWidth);
-        rect.setAttribute("height", barHeight);
-        rect.setAttribute("fill", "#4CAF50");
-        svg.appendChild(rect);
-
-        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        text.setAttribute("x", barWidth + 10);
-        text.setAttribute("y", y + barHeight / 1.5);
-        text.setAttribute("font-size", "14");
-        text.textContent = `${name}: ${xp.toLocaleString()} XP`;
-        svg.appendChild(text);
-    });
-
-    const container = document.getElementById("xpBars");
-    container.innerHTML = "";
-    container.appendChild(svg);
+    const parts = token.split('.');
+    return parts.length === 3 && parts.every(Boolean);
 }
 
 // Main data fetch
@@ -109,8 +50,12 @@ async function fetchProfile() {
                 id
                 login
             }
-            transaction(where: { 
-                type: { _eq: "xp" }
+            transaction(
+                where: {
+                _and: [
+                    { event: { path: { _eq: "/gritlab/school-curriculum" }}},
+                    { type: { _eq: "xp" } }
+                ]
             }, order_by: {createdAt: asc}) {
                 amount
                 createdAt
@@ -126,6 +71,10 @@ async function fetchProfile() {
                 object {
                     name
                 }
+            }
+            object(where: {type: {_eq: "project"}, name: {_ilike: "%javascript%"}}) {
+                name
+                type
             }
         }`;
 
@@ -169,10 +118,14 @@ async function fetchProfile() {
             return acc;
         }, {});
 
-        const skillsText = Object.entries(skillMap)
-            .map(([name, stats]) => `${name}: ${stats.completed} completed`)
-            .join(', ');
-        document.getElementById("skills").textContent = skillsText;
+        const completedProjects = progress
+            .filter(p => p.grade > 0 && p.object && p.object.name && p.object.name.includes(""))
+            .map(p => p.object.name);
+
+        document.getElementById("skills").textContent =
+            completedProjects.length > 0
+                ? "Completed projects: " + completedProjects.join(", ")
+                : "No completed projects yet.";
 
         const xpProgressData = transactions.map((tx, index) => ({
             date: new Date(tx.createdAt),
@@ -183,14 +136,10 @@ async function fetchProfile() {
         if (typeof renderXPProgressChart === "function") {
             renderXPProgressChart(xpProgressData);
         }
-        if (typeof renderProjectStats === "function") {
-            renderProjectStats({
-                pass: progress.filter(p => p.grade >= 1).length,
-                fail: progress.filter(p => p.grade < 1).length
-            });
-        }
+    
 
         renderProjectXPBars(transactions);
+
 
     } catch (err) {
         showError(err.message);

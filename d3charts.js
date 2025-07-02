@@ -108,93 +108,115 @@ function renderXPProgressChart(data) {
         });
 }
 
-function renderProjectStats(data) {
-    const width = 400;
-    const height = 400;
-    const radius = Math.min(width, height) / 2;
 
-    d3.select("#skillsChart").html("");
-    d3.select("#skillsChart").select(".legend").remove(); // Remove previous legend if exists
+function renderProjectXPBars(transactions) {
+    // Filter for piscine javascript projects only
+    const filtered = transactions.filter(tx =>
+        tx.object && tx.object.name && tx.object.name.includes("")
+    );
 
-    const svg = d3.select("#skillsChart")
-        .append("svg")
-        .attr("role", "img")
-        .attr("aria-label", "Pie chart showing pass and fail project stats")
-        .attr("width", width)
-        .attr("height", height)
-        .append("g")
-        .attr("transform", `translate(${width/2},${height/2})`);
-
-    svg.append("title").text("Project statistics pie chart showing pass and fail distribution");
-
-    const color = d3.scaleOrdinal()
-        .domain(["Pass", "Fail"])
-        .range(["#4CAF50", "#f44336"]);
-
-    const pie = d3.pie()
-        .value(d => d.value);
-
-    const data_ready = pie([
-        {name: "Pass", value: data.pass},
-        {name: "Fail", value: data.fail}
-    ]);
-
-    const arc = d3.arc()
-        .innerRadius(radius * 0.6)
-        .outerRadius(radius * 0.8);
-
-    // Add animation on pie slices
-    svg.selectAll('path')
-        .data(data_ready)
-        .enter()
-        .append('path')
-        .attr('d', arc)
-        .attr('fill', d => color(d.data.name))
-        .attr("stroke", "white")
-        .style("stroke-width", "2px")
-        .style("opacity", 0.7)
-        .transition()
-        .duration(1000)
-        .attrTween('d', function(d) {
-            const i = d3.interpolate(d.startAngle, d.endAngle);
-            return function(t) {
-                d.endAngle = i(t);
-                return arc(d);
-            };
-        });
-
-    // Add labels with dynamic contrast color
-    svg.selectAll('text')
-        .data(data_ready)
-        .enter()
-        .append('text')
-        .text(d => `${d.data.name}: ${d.data.value}`)
-        .attr("transform", d => `translate(${arc.centroid(d)})`)
-        .style("text-anchor", "middle")
-        .style("font-size", 12)
-        .style("fill", d => {
-            const bgColor = color(d.data.name);
-            return getBrightness(bgColor) < 140 ? "#fff" : "#000";
-        });
-
-    // Add legend below the pie chart
-    const legend = d3.select("#skillsChart")
-        .append("div")
-        .attr("class", "legend")
-        .style("display", "flex")
-        .style("justify-content", "center")
-        .style("margin-top", "10px");
-
-    ["Pass", "Fail"].forEach(name => {
-        const item = legend.append("div")
-            .style("margin-right", "15px")
-            .style("display", "flex")
-            .style("align-items", "center");
-        item.append("div")
-            .style("width", "20px")
-            .style("height", "20px")
-            .style("background-color", color(name))
-            .style("margin-right", "5px");
-        item.append("span").text(name);
+    // Group by project name and sum XP
+    const projectMap = {};
+    filtered.forEach(tx => {
+        const name = tx.object.name;
+        if (!projectMap[name]) {
+            projectMap[name] = { xp: 0, date: tx.createdAt };
+        }
+        projectMap[name].xp += tx.amount;
+        // Use the latest date for the project
+        if (new Date(tx.createdAt) > new Date(projectMap[name].date)) {
+            projectMap[name].date = tx.createdAt;
+        }
     });
+
+    const data = Object.entries(projectMap).map(([name, info]) => ({
+        name,
+        xp: info.xp,
+        date: info.date
+    }));
+
+    // Sort by XP or date if you want
+    data.sort((a, b) => b.xp - a.xp);
+
+    // SVG setup
+    const margin = {top: 30, right: 30, bottom: 100, left: 60};
+    const width = 700 - margin.left - margin.right;
+    const height = 400 - margin.top - margin.bottom;
+
+    d3.select("#xpBars").html("");
+
+
+    const svg = d3.select("#xpBars")
+    .append("svg")
+    .attr("viewBox", `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
+    .attr("width", "100%")
+    .attr("height", "100%")
+    .attr("preserveAspectRatio", "xMidYMid meet")
+    .append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    // X axis (project names)
+    const x = d3.scaleBand()
+        .domain(data.map(d => d.name))
+        .range([0, width])
+        .padding(0.2);
+
+    svg.append("g")
+        .attr("transform", `translate(0,${height})`)
+        .call(d3.axisBottom(x))
+        .selectAll("text")
+        .attr("transform", "rotate(-45)")
+        .style("text-anchor", "end");
+
+    // Y axis (XP)
+    const y = d3.scaleLinear()
+        .domain([0, d3.max(data, d => d.xp)])
+        .range([height, 0]);
+
+    svg.append("g").call(d3.axisLeft(y));
+
+    // Tooltip
+    const tooltip = d3.select("#xpBars")
+        .append("div")
+        .attr("class", "tooltip")
+        .style("opacity", 0)
+        .style("position", "absolute")
+        .style("background", "#222")
+        .style("color", "#fff")
+        .style("padding", "6px 10px")
+        .style("border-radius", "4px")
+        .style("font-size", "12px")
+        .style("pointer-events", "none");
+
+    // Bars
+    svg.selectAll("rect")
+        .data(data)
+        .enter()
+        .append("rect")
+        .attr("x", d => x(d.name))
+        .attr("y", d => y(d.xp))
+        .attr("width", x.bandwidth())
+        .attr("height", d => height - y(d.xp))
+        .attr("fill", "#4CAF50")
+        .on("mouseover", function(event, d) {
+            d3.select(this).attr("fill", "#388e3c");
+            tooltip.style("opacity", 1)
+                .html(
+                    `<strong>${d.name}</strong><br>Date: ${new Date(d.date).toLocaleDateString()}<br>XP: ${d.xp.toLocaleString()}`
+                );
+        })
+        .on("mousemove", function(event) {
+            const container = document.getElementById("xpBars"); // or the relevant chart container
+            const rect = container.getBoundingClientRect();
+            // event.clientX/Y are relative to the viewport, so subtract the container's top/left
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            tooltip
+                .style("left", (x + 0) + "px")
+                .style("top", (y - 0) + "px");
+        })
+        .on("mouseout", function() {
+            d3.select(this).attr("fill", "#4CAF50");
+            tooltip.style("opacity", 0);
+        });
 }
